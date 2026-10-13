@@ -1,0 +1,74 @@
+name: CI/CD Spring Boot CNTT2
+
+# Chạy trên nhánh main: Mỗi khi code được push lên main thì github action sẽ được kích hoạt
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Xây dựng và kiểm thử ứng dụng Spring Boot
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Kiểm tra source code
+        uses: actions/checkout@v4
+
+      - name: Thiết lập môi trường Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Cấp quyền thực thi cho gradlew
+        run: chmod +x gradlew
+
+      - name: Chạy kiểm thử
+        run: ./gradlew test
+
+      - name: Đóng gói ứng dụng Spring Boot
+        run: ./gradlew bootJar
+
+      - name: Đăng nhập Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Đóng gói Docker image
+        run: |
+          docker build \
+            -t ${{ secrets.DOCKERHUB_USERNAME }}/cntt2-medication-backend:latest \
+            .
+
+      - name: Đẩy Docker image lên Docker Hub
+        run: |
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/cntt2-medication-backend:latest
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Triển khai ứng dụng tới VPS
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_PRIVATE_KEY }}
+          script: |
+            mkdir -p ~/backend-app
+            cd ~/backend-app
+            if [ ! -d "cntt2-medication-backend" ]; then
+              git clone https://github.com/haibtrikkei/cntt2-medication-backend.git
+            else
+              cd cntt2-medication-backend
+              git pull origin main
+            fi
+            
+            cd ~/backend-app/cntt2-medication-backend
+            
+            docker compose pull backend
+            docker compose up -d backend
+            docker compose ps
